@@ -95,6 +95,7 @@ class Drupal7Plugin(p.SingletonPlugin):
         c.user contains the saml2 id of the logged in user we need to
         convert this to represent the ckan user. '''
 
+        log.info('self.drupal_session_name %s', self.drupal_session_name)
         # If no drupal sesssion name create one
         if self.drupal_session_name is None:
             self.create_drupal_session_name()
@@ -102,6 +103,7 @@ class Drupal7Plugin(p.SingletonPlugin):
         cookies = p.toolkit.request.cookies
 
         drupal_sid = cookies.get(self.drupal_session_name)
+        drupal_user = None
         if drupal_sid:
             engine = sa.create_engine(self.connection)
             rows = engine.execute(
@@ -114,10 +116,18 @@ class Drupal7Plugin(p.SingletonPlugin):
                 [self.sysadmin_role, str(drupal_sid)])
 
             for row in rows:
-                self.user(row)
+                drupal_user = row
                 break
 
+        log.info('drupal_sid: %s, drupal_user: %s', drupal_sid, str(drupal_user))
+        self.user(drupal_user)
+
     def user(self, user_data):
+        # if drupal_user is None, set c.user to be None to logout
+        if user_data is None:
+            p.toolkit.c.user = None
+            return
+
         try:
             user = p.toolkit.get_action('user_show')({'return_minimal': True, 'keep_sensitive_data': True}, {'id': user_data.name})
         except p.toolkit.ObjectNotFound:
@@ -137,7 +147,7 @@ class Drupal7Plugin(p.SingletonPlugin):
                     'password': self.make_password(),
                     'sysadmin': bool(user_data.uid),}
             user = p.toolkit.get_action('user_create')({'ignore_auth': True}, user)
-            p.toolkit.c.user = user['name']
+        p.toolkit.c.user = user['name']
 
     def abort(self, status_code, detail, headers, comment):
         # HTTP Status 401 causes a login redirect.  We need to prevent this
